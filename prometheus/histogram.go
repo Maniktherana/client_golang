@@ -1835,3 +1835,71 @@ func (n *nativeExemplars) addExemplar(e *dto.Exemplar) {
 		n.exemplars = append(n.exemplars[:nIdx], append([]*dto.Exemplar{e}, append(n.exemplars[nIdx:rIdx], n.exemplars[rIdx+1:]...)...)...)
 	}
 }
+
+type constNativeHistogram struct {
+	desc       *Desc
+	count      uint64
+	sum        float64
+	buckets    map[float64]uint64
+	labelPairs []*dto.LabelPair
+	createdTs  *timestamppb.Timestamp
+}
+
+func (h *constNativeHistogram) Desc() *Desc {
+	return h.desc
+}
+
+func (h *constNativeHistogram) Write(out *dto.Histogram) error {
+	his := &dto.Histogram{
+		CreatedTimestamp: h.createdTs,
+	}
+
+	buckets := make([]*dto.Bucket, 0, len(h.buckets))
+
+	his.SampleCount = proto.Uint64(h.count)
+	his.SampleSum = proto.Float64(h.sum)
+	for upperBound, count := range h.buckets {
+		buckets = append(buckets, &dto.Bucket{
+			CumulativeCount: proto.Uint64(count),
+			UpperBound:      proto.Float64(upperBound),
+		})
+	}
+
+	if len(buckets) > 0 {
+		sort.Sort(buckSort(buckets))
+	}
+	his.Bucket = buckets
+
+	out = his
+
+	return nil
+}
+
+func (h *constNativeHistogram) Collect(ch chan<- Metric) {
+	panic("not implemented")
+}
+
+func (h *constNativeHistogram) Describe(ch chan<- *Desc) {
+	panic("not implemented")
+}
+
+func (h *constNativeHistogram) Observe(v float64) {
+	panic("not implemented")
+}
+
+func NewConstNativeHistogram(desc *Desc, count uint64, sum float64, buckets map[float64]uint64, labelValues ...string) (Histogram, error) {
+	if desc.err != nil {
+		return nil, desc.err
+	}
+	if err := validateLabelValues(labelValues, len(desc.variableLabels.names)); err != nil {
+		return nil, err
+	}
+
+	return &constNativeHistogram{
+		desc:       desc,
+		count:      count,
+		sum:        sum,
+		buckets:    buckets,
+		labelPairs: MakeLabelPairs(desc, labelValues),
+	}, nil
+}
