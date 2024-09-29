@@ -1846,6 +1846,7 @@ type constNativeHistogram struct {
 	positiveCounts map[int64]uint64
 	negativeCounts map[int64]uint64
 	labelPairs     []*dto.LabelPair
+	exemplars      []*dto.Exemplar
 	createdTs      *timestamppb.Timestamp
 }
 
@@ -1860,6 +1861,7 @@ func (h *constNativeHistogram) Write(out *dto.Metric) error {
 		ZeroThreshold:    proto.Float64(h.zeroThreshold),
 		SampleCount:      proto.Uint64(h.count),
 		SampleSum:        proto.Float64(h.sum),
+		Exemplars:        h.exemplars,
 		CreatedTimestamp: h.createdTs,
 	}
 
