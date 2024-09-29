@@ -1837,69 +1837,73 @@ func (n *nativeExemplars) addExemplar(e *dto.Exemplar) {
 }
 
 type constNativeHistogram struct {
-	desc       *Desc
-	count      uint64
-	sum        float64
-	buckets    map[float64]uint64
-	labelPairs []*dto.LabelPair
-	createdTs  *timestamppb.Timestamp
+	desc           *Desc
+	schema         int32
+	count          uint64
+	sum            float64
+	zeroCount      uint64
+	zeroThreshold  float64
+	positiveCounts map[int64]uint64
+	negativeCounts map[int64]uint64
+	labelPairs     []*dto.LabelPair
+	createdTs      *timestamppb.Timestamp
 }
 
 func (h *constNativeHistogram) Desc() *Desc {
 	return h.desc
 }
 
-func (h *constNativeHistogram) Write(out *dto.Histogram) error {
-	his := &dto.Histogram{
+func (h *constNativeHistogram) Write(out *dto.Metric) error {
+	nHis := &dto.Histogram{
+		Schema:           proto.Int32(h.schema),
+		ZeroCount:        proto.Uint64(h.zeroCount),
+		ZeroThreshold:    proto.Float64(h.zeroThreshold),
+		SampleCount:      proto.Uint64(h.count),
+		SampleSum:        proto.Float64(h.sum),
 		CreatedTimestamp: h.createdTs,
 	}
 
-	buckets := make([]*dto.Bucket, 0, len(h.buckets))
+	positiveSpans, positiveDeltas := convertToSpansAndDeltas(h.positiveCounts)
+	nHis.PositiveSpan = positiveSpans
+	nHis.PositiveDelta = positiveDeltas
 
-	his.SampleCount = proto.Uint64(h.count)
-	his.SampleSum = proto.Float64(h.sum)
-	for upperBound, count := range h.buckets {
-		buckets = append(buckets, &dto.Bucket{
-			CumulativeCount: proto.Uint64(count),
-			UpperBound:      proto.Float64(upperBound),
-		})
-	}
+	negativeSpans, negativeDeltas := convertToSpansAndDeltas(h.negativeCounts)
+	nHis.NegativeSpan = negativeSpans
+	nHis.NegativeDelta = negativeDeltas
 
-	if len(buckets) > 0 {
-		sort.Sort(buckSort(buckets))
-	}
-	his.Bucket = buckets
-
-	out = his
+	out.Histogram = nHis
+	out.Label = h.labelPairs
 
 	return nil
 }
 
-func (h *constNativeHistogram) Collect(ch chan<- Metric) {
-	panic("not implemented")
-}
-
-func (h *constNativeHistogram) Describe(ch chan<- *Desc) {
-	panic("not implemented")
-}
-
-func (h *constNativeHistogram) Observe(v float64) {
-	panic("not implemented")
-}
-
-func NewConstNativeHistogram(desc *Desc, count uint64, sum float64, buckets map[float64]uint64, labelValues ...string) (Histogram, error) {
-	if desc.err != nil {
-		return nil, desc.err
-	}
-	if err := validateLabelValues(labelValues, len(desc.variableLabels.names)); err != nil {
-		return nil, err
+func convertToSpansAndDeltas(counts map[int64]uint64) ([]*dto.BucketSpan, []int64) {
+	if len(counts) == 0 {
+		return nil, nil
 	}
 
-	return &constNativeHistogram{
-		desc:       desc,
-		count:      count,
-		sum:        sum,
-		buckets:    buckets,
-		labelPairs: MakeLabelPairs(desc, labelValues),
-	}, nil
+	var deltas []int64
+	var spans []*dto.BucketSpan
+	var lastIndex int32 = -1
+	var one uint32 = 1
+
+	for index, count := range counts {
+		index32 := int32(index)
+		if lastIndex == -1 {
+			// First span, no gap
+			spans = append(spans, &dto.BucketSpan{Offset: &index32, Length: &one})
+		} else {
+			gap := index32 - lastIndex - 1
+			spans = append(spans, &dto.BucketSpan{Offset: &gap, Length: &one})
+		}
+
+		deltas = append(deltas, int64(count))
+		lastIndex = index32
+	}
+
+	return spans, deltas
+}
+
+func NewConstNativeHistogram() (Metric, error) {
+	panic("not implemented")
 }
